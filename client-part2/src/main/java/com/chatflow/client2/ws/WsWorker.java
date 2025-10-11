@@ -4,9 +4,9 @@ import com.chatflow.client2.metrics.Metrics;
 import com.chatflow.client2.util.JsonUtil;
 import okhttp3.*;
 
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class WsWorker implements Runnable {
     private final String url;
@@ -15,7 +15,7 @@ public class WsWorker implements Runnable {
     private final int maxRetries;
     private final long backoffStartMs;
     private final CountDownLatch doneSignal;
-    private final CountDownLatch echoSignal; // 收到回显就 countDown
+    private final CountDownLatch echoSignal; // count down when an echo (ACK) is received
     private final ConcurrentHashMap<String, Long> inflight;
 
     public WsWorker(String url,
@@ -36,7 +36,8 @@ public class WsWorker implements Runnable {
         this.inflight = inflight;
     }
 
-    @Override public void run() {
+    @Override
+    public void run() {
         OkHttpClient client = new OkHttpClient();
 
         CountDownLatch opened = new CountDownLatch(1);
@@ -44,16 +45,18 @@ public class WsWorker implements Runnable {
 
         Request req = new Request.Builder().url(url).build();
         WebSocketListener listener = new WebSocketListener() {
-            @Override public void onOpen(WebSocket ws, Response resp) {
-                holder[0]=ws;
+            @Override
+            public void onOpen(WebSocket ws, Response resp) {
+                holder[0] = ws;
                 metrics.connections.incrementAndGet();
                 opened.countDown();
             }
 
-            @Override public void onMessage(WebSocket ws, String text) {
+            @Override
+            public void onMessage(WebSocket ws, String text) {
                 metrics.acks.incrementAndGet();
 
-                // 关联合并：优先用 message 里的 token；没有再用 id（兜底）
+                // correlate by token first; fallback to id
                 String key = JsonUtil.extractTokenFromMessage(text);
                 if (key == null) key = JsonUtil.extractField(text, "id");
 
@@ -62,30 +65,40 @@ public class WsWorker implements Runnable {
                     metrics.recordRtt(System.nanoTime() - start);
                 }
 
-                // 统计：按房间、按类型、10s 桶
+                // per-room / per-type counters and 10s bucket
                 Integer room = JsonUtil.extractInt(text, "roomId");
-                if (room != null && metrics.perRoomAck.length > room) metrics.perRoomAck[room].increment();
+                if (room != null && metrics.perRoomAck.length > room) {
+                    metrics.perRoomAck[room].increment();
+                }
                 String type = JsonUtil.extractField(text, "messageType");
                 if (type != null) {
-                    int idx = switch (type) { case "TEXT" -> 0; case "JOIN" -> 1; case "LEAVE" -> 2; default -> 0; };
+                    int idx = switch (type) {
+                        case "TEXT" -> 0;
+                        case "JOIN" -> 1;
+                        case "LEAVE" -> 2;
+                        default -> 0;
+                    };
                     metrics.perTypeAck[idx].increment();
                 }
                 Long ts = JsonUtil.extractEpochMillis(text, "serverTimestamp");
                 metrics.recordAckBucket(ts != null ? ts : System.currentTimeMillis());
 
-                // 逐条明细（在 MainApp 的 writer 线程里落盘）
+                // detail line for CSV
                 if (start != null) {
                     long latMs = (System.nanoTime() - start) / 1_000_000L;
-                    String line = (System.currentTimeMillis()) + "," + (type == null ? "" : type) + "," +
-                            latMs + ",OK," + (room == null ? "" : room);
+                    String line = System.currentTimeMillis() + "," +
+                            (type == null ? "" : type) + "," +
+                            latMs + ",OK," +
+                            (room == null ? "" : room);
                     JsonUtil.offerDetail(line);
                 }
 
                 echoSignal.countDown();
             }
 
-            @Override public void onFailure(WebSocket ws, Throwable t, Response r) {
-                // 可选：做一次轻量重连
+            @Override
+            public void onFailure(WebSocket ws, Throwable t, Response r) {
+                // very light auto-reconnect to keep the worker alive
                 try {
                     metrics.reconnects.incrementAndGet();
                     client.newWebSocket(new Request.Builder().url(url).build(), this);
@@ -102,19 +115,26 @@ public class WsWorker implements Runnable {
 
             while (true) {
                 String msg = producer.nextOrNull();
-                if (msg == null) break; // 生产结束
-
-                // 发送前登记 inflight：用 token（或 id 兜底）
-                String key = JsonUtil.extractTokenFromMessage(msg);
-                if (key == null) key = JsonUtil.extractField(msg, "id");
-                if (key != null) inflight.put(key, System.nanoTime());
+                if (msg == null) break; // production finished
 
                 boolean ok = false;
                 int attempts = 0;
                 long backoff = backoffStartMs;
+
+                // IMPORTANT: only put into inflight AFTER a successful send
+                String key = null; // lazily extracted when we need to record inflight
+
                 while (!ok && attempts < maxRetries) {
                     attempts++;
                     if (ws.send(msg)) {
+                        // on first successful send, extract the correlation key and record inflight
+                        if (key == null) {
+                            key = JsonUtil.extractTokenFromMessage(msg);
+                            if (key == null) key = JsonUtil.extractField(msg, "id");
+                        }
+                        if (key != null) {
+                            inflight.put(key, System.nanoTime());
+                        }
                         metrics.sent.incrementAndGet();
                         ok = true;
                     } else {
@@ -122,14 +142,16 @@ public class WsWorker implements Runnable {
                         backoff = Math.min(backoff * 2, 2000);
                     }
                 }
+
                 if (!ok) {
+                    // message never left the client; do NOT count it as inflight
                     metrics.fail.incrementAndGet();
-                    if (key != null) inflight.remove(key);
                 }
             }
+
             ws.close(1000, "done");
         } catch (Exception ignored) {
-            // 失败在发送环节已计入
+            // any send failures have been accounted for above
         } finally {
             client.dispatcher().executorService().shutdown();
             doneSignal.countDown();

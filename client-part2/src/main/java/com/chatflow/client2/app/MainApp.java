@@ -21,7 +21,7 @@ public class MainApp {
                 " rooms=" + cfg.rooms());
         System.out.flush();
 
-        // 结果目录（client-part2 的上一级 ../results）
+        // Results directory (parent of client-part2 -> ../results)
         Path resultsDir = Paths.get("../results");
         Files.createDirectories(resultsDir);
 
@@ -29,13 +29,13 @@ public class MainApp {
         Path detailPath  = resultsDir.resolve("detail.csv");
         Path bucketPath  = resultsDir.resolve("throughput_10s.csv");
 
-        // Detail 文件表头（若不存在）
+        // Detail file header (if missing)
         if (!Files.exists(detailPath)) {
             Files.writeString(detailPath, "epoch_ms,messageType,latency_ms,status,roomId\n",
                     StandardOpenOption.CREATE);
         }
 
-        // 消息生产
+        // Message production
         MessageFactory factory = new MessageFactory();
         int total   = cfg.total();
         int threads = cfg.threads();
@@ -51,7 +51,7 @@ public class MainApp {
 
         MessageProducer producer = () -> queue.poll(2, TimeUnit.SECONDS);
 
-        // 统计与同步
+        // Statistics and synchronization
         Metrics metrics = new Metrics();
         metrics.initPerRoom(rooms);
 
@@ -59,7 +59,7 @@ public class MainApp {
         CountDownLatch echoAll  = new CountDownLatch(total);
         ConcurrentHashMap<String, Long> inflight = new ConcurrentHashMap<>();
 
-        // 逐条明细写入线程（从 JsonUtil 的 detailQueue 消费）
+        // Detail writer thread (consumes from JsonUtil's detailQueue)
         Thread detailWriter = new Thread(() -> {
             try {
                 while (!Thread.currentThread().isInterrupted()) {
@@ -77,11 +77,11 @@ public class MainApp {
         AtomicInteger roomPicker = new AtomicInteger(0);
         long t0 = System.nanoTime();
 
-        // 监控线程：每秒打印进度 + 采样 inflight（用于 Little's Law）
+        // Monitor thread: print progress every second + sample inflight (for Little's Law)
         ScheduledExecutorService mon = Executors.newSingleThreadScheduledExecutor();
         mon.scheduleAtFixedRate(() -> {
             int infl = inflight.size();
-            metrics.sampleInflight(infl); // <<< 改为通过公开方法采样
+            metrics.sampleInflight(infl); // <<< changed to sample via public method
 
             System.out.println("progress sent=" + metrics.sent.get()
                     + " acks=" + metrics.acks.get()
@@ -100,8 +100,8 @@ public class MainApp {
             ));
         }
 
-        allDone.await();                        // 全部线程发完
-        echoAll.await(10, TimeUnit.SECONDS);    // 等回显收尾
+        allDone.await();                        // All worker threads have finished sending
+        echoAll.await(10, TimeUnit.SECONDS);    // Wait for echoes to finish up
         producerThread.join();
         pool.shutdown();
         mon.shutdownNow();
@@ -109,14 +109,14 @@ public class MainApp {
 
         long t1 = System.nanoTime();
 
-        // 写 10s 桶 CSV
+        // Write 10s bucket CSV
         List<String> bucketLines = metrics.dumpBucketsCsvLines();
         if (bucketLines.size() > 1) {
             Files.write(bucketPath, (String.join("\n", bucketLines) + "\n").getBytes(),
                     StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
         }
 
-        // 汇总
+        // Summary
         var summary = metrics.summarize(t0, t1);
         summaryCsv.append(cfg.baseWsUrl(), threads, total, summary);
 
@@ -128,7 +128,7 @@ public class MainApp {
                 summary.sendTps(), summary.ackTps(),
                 summary.p50ms(), summary.p95ms(), summary.p99ms(),
                 summary.meanMs(), summary.minMs(), summary.maxMs(),
-                summary.connections(), summary.reconnects(), summary.avgInFlight() // <<< 名字修正
+                summary.connections(), summary.reconnects(), summary.avgInFlight() // <<< name correction
         );
     }
 }

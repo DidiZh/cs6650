@@ -5,7 +5,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class MessageFactory {
-    // 50 条消息池
+    // Pool of 50 messages
     private static final String[] POOL = {
             "m0","m1","m2","m3","m4","m5","m6","m7","m8","m9",
             "m10","m11","m12","m13","m14","m15","m16","m17","m18","m19",
@@ -25,15 +25,15 @@ public class MessageFactory {
         int userId = 1 + ThreadLocalRandom.current().nextInt(100_000);
         String username = "user" + userId;
 
-        String token = UUID.randomUUID().toString().substring(0, 8); // RTT 关联用
+        String token = UUID.randomUUID().toString().substring(0, 8); // for RTT correlation
         String base  = POOL[ThreadLocalRandom.current().nextInt(POOL.length)];
-        String msg   = base + "|" + token;                            // 嵌入 token
+        String msg   = base + "|" + token;                            // embed token
 
         String type = nextType();
         String ts   = Instant.now().toString();
-        String id   = UUID.randomUUID().toString();                   // 可有可无
+        String id   = UUID.randomUUID().toString();                   // optional
 
-        // 提醒：服务器不会回显 id/clientTimestamp，但我们使用 message 内 token 关联合并
+        // the server will not echo id/clientTimestamp
         return "{\"id\":\""+id+"\",\"clientTimestamp\":\""+ts+"\"," +
                 "\"userId\":"+userId+"," +
                 "\"username\":\""+username+"\"," +

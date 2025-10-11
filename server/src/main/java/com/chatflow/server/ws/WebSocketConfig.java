@@ -18,6 +18,6 @@ public class WebSocketConfig implements WebSocketConfigurer {
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         // ws://host:8080/chat/{roomId}
         registry.addHandler(chatHandler, "/chat/{roomId}")
-                .setAllowedOriginPatterns("*"); // 开发期开放跨域
+                .setAllowedOriginPatterns("*");
     }
 }

@@ -2,11 +2,11 @@ package com.chatflow.client2.config;
 
 public record AppConfig(
         String baseWsUrl,   // ws://localhost:8080/chat
-        int threads,        // 并发线程数
-        int total,          // 总消息数
-        int rooms,          // 房间数量（1..rooms 随机/轮询）
-        int maxRetries,     // 发送失败最大重试次数
-        long backoffStartMs // 初始退避毫秒
+        int threads,        // number of concurrent threads
+        int total,          // total number of messages
+        int rooms,          // number of rooms (random/round-robin within 1..rooms)
+        int maxRetries,     // maximum retry attempts on send failure
+        long backoffStartMs // initial backoff in milliseconds
 ) {
     public static AppConfig fromArgs(String[] args) {
         String base = args.length > 0 ? args[0] : "ws://localhost:8080/chat";
@@ -18,3 +18,4 @@ public record AppConfig(
         return new AppConfig(base, th, tot, rms, retries, backoff);
     }
 }
+

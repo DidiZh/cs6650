@@ -19,7 +19,7 @@ public class CsvWriter {
         try (BufferedWriter w = Files.newBufferedWriter(
                 file, StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
 
-            // 统一表头：包含 mean_ms 与 avg_inflight（以及 p999_ms，便于后续可选分析）
+            // Unified header: include mean_ms and avg_inflight (and p999_ms for optional later analysis)
             if (needHeader) {
                 w.write(String.join(",",
                         "ts",
@@ -42,7 +42,7 @@ public class CsvWriter {
                 w.newLine();
             }
 
-            // 写入数据行
+            // Write data row
             w.write(String.join(",",
                     Instant.now().toString(),
                     baseUrl,

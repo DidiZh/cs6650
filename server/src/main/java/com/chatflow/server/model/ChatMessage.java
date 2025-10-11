@@ -3,7 +3,7 @@ package com.chatflow.server.model;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties; // ✅ 新增
 import jakarta.validation.constraints.*;
 
-@JsonIgnoreProperties(ignoreUnknown = true)  // ✅ 新增：忽略未识别的JSON字段
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class ChatMessage {
     @Min(1) @Max(100000)
     public Integer userId;

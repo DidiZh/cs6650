@@ -1,0 +1,19 @@
+flowchart LR
+    subgraph Clients
+      CP1[client-part1\nSingle client] -->|ws://.../chat/{roomId}\n1 connection| Server
+      CP2[client-part2\nLoad generator\nN threads, R rooms] -->|ws://.../chat/{roomId}\nM concurrent| Server
+    end
+
+    subgraph Server[Spring Boot WebSocket Server]
+      H[HealthController\nGET /health]
+      C[ChatHandler\nextends TextWebSocketHandler]
+      CFG[WebSocketConfig\nregistry.addHandler(...)]
+      Model[ChatMessage/MessageType\nValidation]
+      C <--> Model
+      CFG --> C
+      H -. http .-> Server
+    end
+
+    CP2 -->|CSV out\nmain_summary.csv\ndetail.csv\nthroughput_10s.csv| CSVs[(../results)]
+
+    style Server fill:#f7f7ff,stroke:#888,stroke-width:1px

@@ -9,40 +9,40 @@ import java.util.concurrent.atomic.*;
 
 public class Metrics {
 
-    // 基础计数
+    // Basic counters
     public final AtomicLong sent  = new AtomicLong();
     public final AtomicLong acks  = new AtomicLong();
     public final AtomicLong fail  = new AtomicLong();
 
-    // 连接统计
+    // Connection statistics
     public final AtomicLong connections = new AtomicLong();
     public final AtomicLong reconnects  = new AtomicLong();
 
-    // RTT 统计（纳秒）
+    // RTT statistics (nanoseconds)
     private final List<Long> rttsNanos = Collections.synchronizedList(new ArrayList<>());
     private final LongAdder sumRtt = new LongAdder();
     private final AtomicLong minRtt = new AtomicLong(Long.MAX_VALUE);
     private final AtomicLong maxRtt = new AtomicLong(Long.MIN_VALUE);
 
-    // Little's Law 采样：inflight 平均
+    // Little's Law sampling: average inflight
     private final LongAdder inflightSamples = new LongAdder();
     private final LongAdder inflightSum     = new LongAdder();
 
-    // 10 秒桶吞吐（按 ack 计）
-    // key = bucketStartEpochSeconds(10s 对齐), value = 该桶 ack 计数
+    // 10-second bucket throughput (counted by ack)
+    // key = bucketStartEpochSeconds (aligned to 10s), value = ack count in that bucket
     public final ConcurrentMap<Long, LongAdder> bucketAck10s = new ConcurrentHashMap<>();
 
-    // 按房间/类型计数（在 MainApp 知道 rooms 数量后初始化）
+    // Per-room / per-type counters (initialized after MainApp knows the number of rooms)
     public LongAdder[] perRoomAck = new LongAdder[0];
     // 0:TEXT 1:JOIN 2:LEAVE
     public final LongAdder[] perTypeAck = new LongAdder[]{ new LongAdder(), new LongAdder(), new LongAdder() };
 
     public void initPerRoom(int rooms) {
-        perRoomAck = new LongAdder[rooms + 1]; // roomId 从 1 开始
+        perRoomAck = new LongAdder[rooms + 1]; // roomId starts at 1
         for (int i = 0; i <= rooms; i++) perRoomAck[i] = new LongAdder();
     }
 
-    /** 外部记录一次 RTT（纳秒） */
+    /** Record one RTT (nanoseconds) from an external caller. */
     public void recordRtt(long nanos) {
         rttsNanos.add(nanos);
         sumRtt.add(nanos);
@@ -50,15 +50,15 @@ public class Metrics {
         maxRtt.getAndUpdate(v -> Math.max(v, nanos));
     }
 
-    /** 外部采样一次当前在飞量，用于平均在飞量 avg_inflight 计算 */
+    /** Sample the current inflight count once for computing avg_inflight. */
     public void sampleInflight(int inFlight) {
         inflightSamples.increment();
         inflightSum.add(inFlight);
     }
 
-    /** 在 10s 桶里按 ack 计数一次 */
+    /** Count one ack into the 10s bucket corresponding to the given epochMillis. */
     public void recordAckBucket(long epochMillis) {
-        long bucket = (epochMillis / 1000L) / 10L * 10L; // 10s 桶
+        long bucket = (epochMillis / 1000L) / 10L * 10L; // 10s bucket
         bucketAck10s.computeIfAbsent(bucket, k -> new LongAdder()).increment();
     }
 
@@ -76,7 +76,7 @@ public class Metrics {
         double sendTps = seconds > 0 ? sent.get() / seconds : 0.0;
         double ackTps  = seconds > 0 ? acks.get() / seconds : 0.0;
 
-        // percentiles
+        // Percentiles
         double p50=0, p95=0, p99=0, p999=0, mean=0, min=0, max=0;
         List<Long> copy;
         synchronized (rttsNanos) { copy = new ArrayList<>(rttsNanos); }
@@ -114,7 +114,7 @@ public class Metrics {
         return sorted.get(idx);
     }
 
-    // 工具：将 10s 桶输出为 CSV 行（ISO 时间 + count）
+    // Utility: dump 10s buckets as CSV lines (ISO timestamp + count)
     public List<String> dumpBucketsCsvLines() {
         DateTimeFormatter fmt = DateTimeFormatter.ISO_LOCAL_DATE_TIME.withZone(ZoneOffset.UTC);
         List<Long> keys = new ArrayList<>(bucketAck10s.keySet());
