@@ -1,0 +1,2 @@
+messages,send_time,send_rate,consume_time,total_time,throughput
+500000,53,9433,0,53,9433
