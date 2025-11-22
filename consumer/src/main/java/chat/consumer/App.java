@@ -17,12 +17,15 @@ public class App {
     private static final Logger log = LoggerFactory.getLogger(App.class);
 
     public static void main(String[] args) {
+        ConsumerSupervisor supervisor = null;
+        RabbitMqQueueClient mq = null;
+
         try {
             // 1) 加载配置
             ConsumerConfig cfg = ConsumerConfig.load();
 
             // 2) 构造并连接 MQ（不要用 try-with-resources，避免启动完立刻关闭）
-            RabbitMqQueueClient mq = new RabbitMqQueueClient(cfg);
+            mq = new RabbitMqQueueClient(cfg);
             mq.connect();
 
             // 3) 读取广播目标（ENV 优先，其次 system property，最后给默认）
@@ -36,8 +39,8 @@ public class App {
             RoomManager roomManager = new RoomManager();
             roomManager.setBroadcaster(broadcaster);
 
-            // 5) 启动消费者监督器
-            ConsumerSupervisor supervisor = new ConsumerSupervisor(
+            // 5) 启动消费者监督器（包含数据库初始化）
+            supervisor = new ConsumerSupervisor(
                     mq,
                     roomManager,
                     broadcaster,
@@ -54,27 +57,65 @@ public class App {
 
             supervisor.start(cfg.roomIds);
 
-            // 6) 优雅退出：Ctrl-C 时先停 supervisor 再关 MQ
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                try {
-                    log.info("Shutdown signal received. Stopping supervisor & closing MQ...");
-                    supervisor.stop();
-                } catch (Exception e) {
-                    log.warn("Error while stopping supervisor", e);
-                }
-                try {
-                    mq.close();
-                } catch (Exception e) {
-                    log.warn("Error while closing MQ", e);
-                }
-                log.info("Shutdown complete.");
-            }));
+            log.info("✅ Consumer started successfully with database persistence enabled");
 
-            // 7) 挂住主线程，避免进程直接退出导致 “Closed all channels and connection”
+            // 6) 优雅退出：Ctrl-C 时先停 supervisor 再关 MQ
+            final ConsumerSupervisor finalSupervisor = supervisor;
+            final RabbitMqQueueClient finalMq = mq;
+
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                log.info("========================================");
+                log.info("Shutdown signal received...");
+                log.info("========================================");
+
+                try {
+                    if (finalSupervisor != null) {
+                        log.info("Stopping supervisor (includes flushing database)...");
+                        finalSupervisor.stop();
+                        log.info("✅ Supervisor stopped");
+                    }
+                } catch (Exception e) {
+                    log.error("❌ Error while stopping supervisor", e);
+                }
+
+                try {
+                    if (finalMq != null) {
+                        log.info("Closing RabbitMQ connection...");
+                        finalMq.close();
+                        log.info("✅ RabbitMQ closed");
+                    }
+                } catch (Exception e) {
+                    log.error("❌ Error while closing MQ", e);
+                }
+
+                log.info("========================================");
+                log.info("Shutdown complete.");
+                log.info("========================================");
+            }, "shutdown-hook"));
+
+            // 7) 挂住主线程，避免进程直接退出导致 "Closed all channels and connection"
             new CountDownLatch(1).await();
 
         } catch (Throwable t) {
-            LoggerFactory.getLogger(App.class).error("Fatal error in App.main", t);
+            log.error("❌ Fatal error in App.main", t);
+
+            // 尝试清理资源
+            if (supervisor != null) {
+                try {
+                    supervisor.stop();
+                } catch (Exception e) {
+                    log.error("Error during emergency cleanup of supervisor", e);
+                }
+            }
+
+            if (mq != null) {
+                try {
+                    mq.close();
+                } catch (Exception e) {
+                    log.error("Error during emergency cleanup of MQ", e);
+                }
+            }
+
             System.exit(1);
         }
     }
